@@ -108,7 +108,7 @@ bool SemanticScene::loadMp3dHouse(
 
   auto getBBox = [&](const std::vector<std::string>& tokens, int offset) {
     return box3f(getVec3f(tokens, offset),
-                 getVec3f(tokens, offset + 3).array().abs().matrix());
+                 getVec3f(tokens, offset + 3));
   };
 
   auto getOBB = [&](const std::vector<std::string>& tokens, int offset) {
