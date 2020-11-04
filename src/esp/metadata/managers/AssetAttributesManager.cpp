@@ -143,9 +143,9 @@ int AssetAttributesManager::registerObjectFinalize(
   return primTemplateID;
 }  // AssetAttributesManager::registerObjectFinalize
 
-AbstractPrimitiveAttributes::ptr AssetAttributesManager::loadFromJSONDoc(
+AbstractPrimitiveAttributes::ptr AssetAttributesManager::buildObjectFromJSONDoc(
     const std::string& filename,
-    const io::JsonDocument& jsonDoc) {
+    const io::JsonGenericValue& jsonDoc) {
   // find type of attributes - file name should contain handle
   const std::string primAttrHandle =
       Cr::Utility::Directory::splitExtension(
@@ -157,30 +157,35 @@ AbstractPrimitiveAttributes::ptr AssetAttributesManager::loadFromJSONDoc(
   // if not legal primitive asset attributes file name, have message and return
   // default sphere attributes.
   if (defaultPrimAttributeHandles_.count(primClassName) == 0) {
-    LOG(ERROR) << "AssetAttributesManager::loadFromJSONDoc :Unknown "
+    LOG(ERROR) << "AssetAttributesManager::buildObjectFromJSONDoc :Unknown "
                   "primitive class type : "
                << primClassName
                << " so returning default attributes for solid uvSphere.";
-    return this->getObjectCopyByHandle<Attrs::UVSpherePrimitiveAttributes>(
+    return this->getObjectCopyByHandle<attributes::UVSpherePrimitiveAttributes>(
         defaultPrimAttributeHandles_.at("uvSphereSolid"));
   }
 
-  // create attributes for this primitive
-  auto primAssetAttributes = this->initNewObjectInternal(primClassName);
+  // create attributes for the primitive described in the JSON file
+  auto primAssetAttributes = this->initNewObjectInternal(primClassName, true);
   if (nullptr == primAssetAttributes) {
     LOG(ERROR)
-        << "AssetAttributesManager::loadFromJSONDoc : unable to "
+        << "AssetAttributesManager::buildObjectFromJSONDoc : unable to "
            "create default primitive asset attributes from primClassName "
         << primClassName
         << " so returning default attributes for solid uvSphere.";
-    return this->getObjectCopyByHandle<Attrs::UVSpherePrimitiveAttributes>(
+    return this->getObjectCopyByHandle<attributes::UVSpherePrimitiveAttributes>(
         defaultPrimAttributeHandles_.at("uvSphereSolid"));
   }
+  this->setValsFromJSONDoc(primAssetAttributes, jsonDoc);
+  return primAssetAttributes;
+}  // AssetAttributesManager::buildObjectFromJSONDoc
 
+void AssetAttributesManager::setValsFromJSONDoc(
+    AttribsPtr attribs,
+    const io::JsonGenericValue& jsonConfig) {
   // TODO support loading values from JSON docs
 
-  return primAssetAttributes;
-}  // AssetAttributesManager::loadFromJSONDoc
+}  // AssetAttributesManager::buildObjectFromJSONDoc
 
 }  // namespace managers
 }  // namespace metadata

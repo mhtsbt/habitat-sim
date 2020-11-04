@@ -51,7 +51,8 @@ class BulletPhysicsManager : public PhysicsManager {
    */
   explicit BulletPhysicsManager(
       assets::ResourceManager& _resourceManager,
-      const Attrs::PhysicsManagerAttributes::cptr _physicsManagerAttributes)
+      const metadata::attributes::PhysicsManagerAttributes::cptr
+          _physicsManagerAttributes)
       : PhysicsManager(_resourceManager, _physicsManagerAttributes) {
     collisionObjToObjIds_ =
         std::make_shared<std::map<const btCollisionObject*, int>>();
@@ -182,6 +183,13 @@ class BulletPhysicsManager : public PhysicsManager {
    */
   virtual RaycastResults castRay(const esp::geo::Ray& ray,
                                  double maxDistance = 100.0) override;
+
+  // The number of contact points that were active during the last step. An
+  // object resting on another object will involve several active contact
+  // points. Once both objects are asleep, the contact points are inactive. This
+  // count can be used as a metric for the complexity/cost of collision-handling
+  // in the current scene.
+  int getNumActiveContactPoints() override;
 
  protected:
   //============ Initialization =============

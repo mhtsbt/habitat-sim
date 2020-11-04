@@ -5,6 +5,8 @@
 #include <Magnum/BulletIntegration/DebugDraw.h>
 #include <Magnum/BulletIntegration/Integration.h>
 
+#include <utility>
+
 #include "BulletCollision/CollisionShapes/btCompoundShape.h"
 #include "BulletCollision/CollisionShapes/btConvexHullShape.h"
 #include "BulletCollision/CollisionShapes/btConvexTriangleMeshShape.h"
@@ -20,12 +22,13 @@ BulletRigidStage::BulletRigidStage(
     std::shared_ptr<btMultiBodyDynamicsWorld> bWorld,
     std::shared_ptr<std::map<const btCollisionObject*, int> >
         collisionObjToObjIds)
-    : BulletBase(bWorld, collisionObjToObjIds), RigidStage{rigidBodyNode} {}
+    : BulletBase(std::move(bWorld), std::move(collisionObjToObjIds)),
+      RigidStage{rigidBodyNode} {}
 
 BulletRigidStage::~BulletRigidStage() {
   // remove collision objects from the world
   for (auto& co : bStaticCollisionObjects_) {
-    bWorld_->removeCollisionObject(co.get());
+    bWorld_->removeRigidBody(co.get());
     collisionObjToObjIds_->erase(co.get());
   }
 }
@@ -45,7 +48,10 @@ bool BulletRigidStage::initialization_LibSpecific(
     object->setFriction(initializationAttributes_->getFrictionCoefficient());
     object->setRestitution(
         initializationAttributes_->getRestitutionCoefficient());
-    bWorld_->addCollisionObject(object.get());
+    bWorld_->addRigidBody(
+        object.get(),
+        2,       // collisionFilterGroup (2 == StaticFilter)
+        1 + 2);  // collisionFilterMask (1 == DefaultFilter, 2==StaticFilter)
     collisionObjToObjIds_->emplace(object.get(), objectId_);
   }
 
@@ -90,21 +96,24 @@ void BulletRigidStage::constructBulletSceneFromMeshes(
     std::unique_ptr<btBvhTriangleMeshShape> meshShape =
         std::make_unique<btBvhTriangleMeshShape>(indexedVertexArray.get(),
                                                  true);
-    meshShape->setMargin(0.04);
+    meshShape->setMargin(initializationAttributes_->getMargin());
     meshShape->setLocalScaling(
         btVector3{transformFromLocalToWorld
                       .scaling()});  // scale is a property of the shape
 
     // re-build the bvh after setting margin
     meshShape->buildOptimizedBvh();
-    std::unique_ptr<btCollisionObject> sceneCollisionObject =
-        std::make_unique<btCollisionObject>();
-    sceneCollisionObject->setCollisionShape(meshShape.get());
-    // rotation|translation are properties of the object
-    sceneCollisionObject->setWorldTransform(
+    // mass == 0 to indicate static. See isStaticObject assert below. See also
+    // examples/MultiThreadedDemo/CommonRigidBodyMTBase.h
+    btVector3 localInertia(0, 0, 0);
+    btRigidBody::btRigidBodyConstructionInfo cInfo(
+        /*mass*/ 0.0, nullptr, meshShape.get(), localInertia);
+    cInfo.m_startWorldTransform =
         btTransform{btMatrix3x3{transformFromLocalToWorld.rotation()},
-                    btVector3{transformFromLocalToWorld.translation()}});
-
+                    btVector3{transformFromLocalToWorld.translation()}};
+    std::unique_ptr<btRigidBody> sceneCollisionObject =
+        std::make_unique<btRigidBody>(cInfo);
+    ASSERT(sceneCollisionObject->isStaticObject());
     bStageArrays_.emplace_back(std::move(indexedVertexArray));
     bStageShapes_.emplace_back(std::move(meshShape));
     bStaticCollisionObjects_.emplace_back(std::move(sceneCollisionObject));

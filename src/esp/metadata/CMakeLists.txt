@@ -5,24 +5,36 @@
 set(
   metadata_SOURCES
   attributes/AttributesBase.h
+  attributes/LightLayoutAttributes.h
+  attributes/LightLayoutAttributes.cpp
   attributes/ObjectAttributes.h
   attributes/ObjectAttributes.cpp
-  attributes/SceneAttributes.h
-  attributes/SceneAttributes.cpp
   attributes/PhysicsManagerAttributes.h
   attributes/PhysicsManagerAttributes.cpp
   attributes/PrimitiveAssetAttributes.h
   attributes/PrimitiveAssetAttributes.cpp
+  attributes/SceneAttributes.h
+  attributes/SceneAttributes.cpp
+  attributes/SceneDatasetAttributes.h
+  attributes/SceneDatasetAttributes.cpp
   managers/AttributesManagerBase.h
   managers/AbstractObjectAttributesManagerBase.h
   managers/AssetAttributesManager.h
   managers/AssetAttributesManager.cpp
+  managers/LightLayoutAttributesManager.h
+  managers/LightLayoutAttributesManager.cpp
   managers/ObjectAttributesManager.h
   managers/ObjectAttributesManager.cpp
   managers/PhysicsAttributesManager.h
   managers/PhysicsAttributesManager.cpp
+  managers/SceneAttributesManager.h
+  managers/SceneAttributesManager.cpp
+  managers/SceneDatasetAttributesManager.h
+  managers/SceneDatasetAttributesManager.cpp
   managers/StageAttributesManager.h
   managers/StageAttributesManager.cpp
+  MetadataMediator.h
+  MetadataMediator.cpp
 )
 find_package(Magnum REQUIRED Primitives)
 

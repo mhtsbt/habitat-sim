@@ -16,6 +16,7 @@
 #include <utility>
 #include <vector>
 
+#include <Corrade/Containers/EnumSet.h>
 #include <Corrade/Containers/Optional.h>
 #include <Magnum/EigenIntegration/Integration.h>
 #include <Magnum/GL/TextureFormat.h>
@@ -29,6 +30,7 @@
 #include "GenericMeshData.h"
 #include "MeshData.h"
 #include "MeshMetaData.h"
+#include "esp/gfx/Drawable.h"
 #include "esp/gfx/DrawableGroup.h"
 #include "esp/gfx/MaterialData.h"
 #include "esp/gfx/ShaderManager.h"
@@ -36,11 +38,8 @@
 #include "esp/scene/SceneManager.h"
 #include "esp/scene/SceneNode.h"
 
+#include "esp/metadata/MetadataMediator.h"
 #include "esp/metadata/attributes/AttributesBase.h"
-#include "esp/metadata/managers/AssetAttributesManager.h"
-#include "esp/metadata/managers/ObjectAttributesManager.h"
-#include "esp/metadata/managers/PhysicsAttributesManager.h"
-#include "esp/metadata/managers/StageAttributesManager.h"
 
 // forward declarations
 namespace Magnum {
@@ -52,9 +51,6 @@ class PhongMaterialData;
 }  // namespace Magnum
 
 namespace Mn = Magnum;
-
-namespace Attrs = esp::metadata::attributes;
-namespace AttrMgrs = esp::metadata::managers;
 
 namespace esp {
 namespace gfx {
@@ -112,17 +108,35 @@ class ResourceManager {
   static constexpr char PER_VERTEX_OBJECT_ID_MATERIAL_KEY[] =
       "per_vertex_object_id";
 
+  /**
+   * @brief Flag
+   *
+   * @see @ref Flags, @ref flags()
+   */
+  enum class Flag : Magnum::UnsignedShort {
+    /**
+     * build phong material from PBR material
+     */
+    BuildPhongFromPbr = 1 << 0,
+  };
+
+  /**
+   * @brief Flags
+   */
+  typedef Corrade::Containers::EnumSet<Flag> Flags;
+
   /** @brief Constructor */
-  explicit ResourceManager();
+  explicit ResourceManager(metadata::MetadataMediator::ptr& _metadataMediator,
+                           Flags flags = {});
 
   /** @brief Destructor */
   ~ResourceManager() {}
 
   /**
-   * @brief This function will build the various @ref Importers and @ref
-   * esp::metadata::managers::AttributesManager s used by the system.
+   * @brief This function will build the various @ref Importers used by the
+   * system.
    */
-  void buildImportersAndAttributesManagers();
+  void buildImporters();
 
   /**
    * @brief Build default primitive attribute files and synthesize an object of
@@ -147,7 +161,8 @@ class ResourceManager {
       std::shared_ptr<physics::PhysicsManager>& physicsManager,
       bool isEnabled,
       scene::SceneNode* parent,
-      const Attrs::PhysicsManagerAttributes::ptr& physicsManagerAttributes);
+      const metadata::attributes::PhysicsManagerAttributes::ptr&
+          physicsManagerAttributes);
 
   /**
    * @brief Load a scene mesh and add it to the specified @ref DrawableGroup as
@@ -167,11 +182,12 @@ class ResourceManager {
    * @ref SimulatorConfiguration
    * @return Whether or not the scene load succeeded.
    */
-  bool loadStage(const Attrs::StageAttributes::ptr& sceneAttributes,
-                 std::shared_ptr<physics::PhysicsManager> _physicsManager,
-                 esp::scene::SceneManager* sceneManagerPtr,
-                 std::vector<int>& activeSceneIDs,
-                 bool createSemanticMesh);
+  bool loadStage(
+      const metadata::attributes::StageAttributes::ptr& sceneAttributes,
+      const std::shared_ptr<physics::PhysicsManager>& _physicsManager,
+      esp::scene::SceneManager* sceneManagerPtr,
+      std::vector<int>& activeSceneIDs,
+      bool createSemanticMesh);
 
   /**
    * @brief Construct scene collision mesh group based on name and type of
@@ -218,31 +234,49 @@ class ResourceManager {
   /**
    * @brief Return manager for construction and access to asset attributes.
    */
-  const AttrMgrs::AssetAttributesManager::ptr getAssetAttributesManager()
-      const {
-    return assetAttributesManager_;
+  const metadata::managers::AssetAttributesManager::ptr
+  getAssetAttributesManager() const {
+    return metadataMediator_->getAssetAttributesManager();
   }
+  /**
+   * @brief Return manager for construction and access to light and lighting
+   * layout attributes.
+   */
+  const metadata::managers::LightLayoutAttributesManager::ptr
+  getLightLayoutAttributesManager() const {
+    return metadataMediator_->getLightLayoutAttributesManager();
+  }
+
   /**
    * @brief Return manager for construction and access to object attributes.
    */
-  const AttrMgrs::ObjectAttributesManager::ptr getObjectAttributesManager()
-      const {
-    return objectAttributesManager_;
+  const metadata::managers::ObjectAttributesManager::ptr
+  getObjectAttributesManager() const {
+    return metadataMediator_->getObjectAttributesManager();
   }
   /**
    * @brief Return manager for construction and access to physics world
    * attributes.
    */
-  const AttrMgrs::PhysicsAttributesManager::ptr getPhysicsAttributesManager()
-      const {
-    return physicsAttributesManager_;
+  const metadata::managers::PhysicsAttributesManager::ptr
+  getPhysicsAttributesManager() const {
+    return metadataMediator_->getPhysicsAttributesManager();
   }
   /**
    * @brief Return manager for construction and access to scene attributes.
    */
-  const AttrMgrs::StageAttributesManager::ptr getStageAttributesManager()
-      const {
-    return stageAttributesManager_;
+  const metadata::managers::StageAttributesManager::ptr
+  getStageAttributesManager() const {
+    return metadataMediator_->getStageAttributesManager();
+  }
+
+  /**
+   * @brief Set a reference to the current @ref metadataMediator_.  Perform any
+   * initialization that may be required when @ref metadataMediator_ is changed.
+   * @param _MM a reference to the new @ref metadataMediator_.
+   */
+  void setMetadataMediator(metadata::MetadataMediator::ptr _MM) {
+    metadataMediator_ = _MM;
   }
 
   /**
@@ -324,7 +358,7 @@ class ResourceManager {
    * child.
    * @param drawables The @ref DrawableGroup with which the object @ref
    * gfx::Drawable will be rendered.
-   * @param lightSetup The @ref LightSetup key that will be used
+   * @param lightSetupKey The @ref LightSetup key that will be used
    * for the added component.
    * @param[out] visNodeCache Cache for pointers to all nodes created as the
    * result of this process.
@@ -333,14 +367,15 @@ class ResourceManager {
                             scene::SceneNode* parent,
                             DrawableGroup* drawables,
                             std::vector<scene::SceneNode*>& visNodeCache,
-                            const Mn::ResourceKey& lightSetup = Mn::ResourceKey{
-                                DEFAULT_LIGHTING_KEY}) {
+                            const Mn::ResourceKey& lightSetupKey =
+                                Mn::ResourceKey{DEFAULT_LIGHTING_KEY}) {
     if (objTemplateLibID != ID_UNDEFINED) {
       const std::string& objTemplateHandleName =
-          objectAttributesManager_->getObjectHandleByID(objTemplateLibID);
+          metadataMediator_->getObjectAttributesManager()->getObjectHandleByID(
+              objTemplateLibID);
 
       addObjectToDrawables(objTemplateHandleName, parent, drawables,
-                           visNodeCache, lightSetup);
+                           visNodeCache, lightSetupKey);
     }  // else objTemplateID does not exist - shouldn't happen
   }    // addObjectToDrawables
 
@@ -360,7 +395,7 @@ class ResourceManager {
    * child.
    * @param drawables The @ref DrawableGroup with which the object @ref
    * gfx::Drawable will be rendered.
-   * @param lightSetup The @ref LightSetup key that will be used
+   * @param lightSetupKey The @ref LightSetup key that will be used
    * for the added component.
    * @param[out] visNodeCache Cache for pointers to all nodes created as the
    * result of this process.
@@ -369,8 +404,8 @@ class ResourceManager {
                             scene::SceneNode* parent,
                             DrawableGroup* drawables,
                             std::vector<scene::SceneNode*>& visNodeCache,
-                            const Mn::ResourceKey& lightSetup = Mn::ResourceKey{
-                                DEFAULT_LIGHTING_KEY});
+                            const Mn::ResourceKey& lightSetupKey =
+                                Mn::ResourceKey{DEFAULT_LIGHTING_KEY});
 
   /**
    * @brief Create a new drawable primitive attached to the desired @ref
@@ -420,7 +455,7 @@ class ResourceManager {
    * @return the coordinate frame of the assets the passed attributes describes.
    */
   esp::geo::CoordinateFrame buildFrameFromAttributes(
-      const Attrs::AbstractObjectAttributes::ptr& attribs,
+      const metadata::attributes::AbstractObjectAttributes::ptr& attribs,
       const Magnum::Vector3& origin);
 
   /**
@@ -496,7 +531,7 @@ class ResourceManager {
    * the meshes, textures, materials, and component heirarchy of the asset.
    * @param parent The @ref scene::SceneNode of which the component will be a
    * child.
-   * @param lightSetup The @ref LightSetup key that will be used
+   * @param lightSetupKey The @ref LightSetup key that will be used
    * for the added component.
    * @param drawables The @ref DrawableGroup with which the component will be
    * rendered.
@@ -509,7 +544,7 @@ class ResourceManager {
    */
   void addComponent(const MeshMetaData& metaData,
                     scene::SceneNode& parent,
-                    const Mn::ResourceKey& lightSetup,
+                    const Mn::ResourceKey& lightSetupKey,
                     DrawableGroup* drawables,
                     const MeshTransformNode& meshTransformNode,
                     std::vector<scene::SceneNode*>& visNodeCache,
@@ -605,6 +640,18 @@ class ResourceManager {
       int textureBaseIndex);
 
   /**
+   * @brief Build a @ref PbrMaterialData for use with PBR shading
+   *
+   * Textures must already be loaded for the asset this material belongs to
+   *
+   * @param material Material data with texture IDs
+   * @param textureBaseIndex Base index of the assets textures in textures_
+   */
+  gfx::PbrMaterialData::uptr buildPbrShadedMaterialData(
+      const Mn::Trade::PbrMetallicRoughnessMaterialData& material,
+      int textureBaseIndex);
+
+  /**
    * @brief Load a mesh describing some scene asset based on the passed
    * assetInfo.
    *
@@ -619,7 +666,7 @@ class ResourceManager {
    * computed
    * @param splitSemanticMesh Split the semantic mesh by objectID, used for A/B
    * testing
-   * @param lightSetup The @ref LightSetup key that will be used
+   * @param lightSetupKey The @ref LightSetup key that will be used
    * for the loaded asset.
    */
   bool loadStageInternal(const AssetInfo& info,
@@ -627,7 +674,7 @@ class ResourceManager {
                          DrawableGroup* drawables = nullptr,
                          bool computeAbsoluteAABBs = false,
                          bool splitSemanticMesh = true,
-                         const Mn::ResourceKey& lightSetup = Mn::ResourceKey{
+                         const Mn::ResourceKey& lightSetupKey = Mn::ResourceKey{
                              NO_LIGHT_KEY});
 
   /**
@@ -653,7 +700,7 @@ class ResourceManager {
    * created
    */
   std::map<std::string, AssetInfo> createStageAssetInfosFromAttributes(
-      const Attrs::StageAttributes::ptr& stageAttributes,
+      const metadata::attributes::StageAttributes::ptr& stageAttributes,
       bool createCollisionInfo,
       bool createSemanticInfo);
 
@@ -704,15 +751,15 @@ class ResourceManager {
    * rendered.
    * @param computeAbsoluteAABBs Whether absolute bounding boxes should be
    * computed
-   * @param lightSetup The @ref LightSetup key that will be used
+   * @param lightSetupKey The @ref LightSetup key that will be used
    * for the loaded asset.
    */
-  bool loadGeneralMeshData(const AssetInfo& info,
-                           scene::SceneNode* parent = nullptr,
-                           DrawableGroup* drawables = nullptr,
-                           bool computeAbsoluteAABBs = false,
-                           const Mn::ResourceKey& lightSetup = Mn::ResourceKey{
-                               NO_LIGHT_KEY});
+  bool loadGeneralMeshData(
+      const AssetInfo& info,
+      scene::SceneNode* parent = nullptr,
+      DrawableGroup* drawables = nullptr,
+      bool computeAbsoluteAABBs = false,
+      const Mn::ResourceKey& lightSetupKey = Mn::ResourceKey{NO_LIGHT_KEY});
 
   /**
    * @brief Load a SUNCG mesh into assets from a file. !Deprecated! TODO:
@@ -742,7 +789,7 @@ class ResourceManager {
    * @brief Checks if light setup is compatible with loaded asset
    */
   bool isLightSetupCompatible(const LoadedAssetData& loadedAssetData,
-                              const Mn::ResourceKey& lightSetup) const;
+                              const Mn::ResourceKey& lightSetupKey) const;
 
   // ======== Geometry helper functions, data structures ========
 
@@ -806,11 +853,12 @@ class ResourceManager {
    * the
    * @ref gfx::Drawable.
    * @param mesh The render mesh.
+   * @param meshAttributeFlags flags for the attributes of the render mesh
    * @param node The @ref scene::SceneNode to which the drawable will be
    * attached.
-   * @param lightSetup The @ref LightSetup key that will be used
+   * @param lightSetupKey The @ref LightSetup key that will be used
    * for the drawable.
-   * @param material The @ref MaterialData key that will be used
+   * @param materialKey The @ref MaterialData key that will be used
    * for the drawable.
    * @param meshID Optional, the index of this mesh component stored in
    * meshes_
@@ -820,11 +868,15 @@ class ResourceManager {
    * @param color Optional color parameter for the shader program. Defaults to
    * white.
    */
-  void createGenericDrawable(Mn::GL::Mesh& mesh,
-                             scene::SceneNode& node,
-                             const Mn::ResourceKey& lightSetup,
-                             const Mn::ResourceKey& material,
-                             DrawableGroup* group = nullptr);
+
+  void createDrawable(Mn::GL::Mesh& mesh,
+                      gfx::Drawable::Flags& meshAttributeFlags,
+                      scene::SceneNode& node,
+                      const Mn::ResourceKey& lightSetupKey,
+                      const Mn::ResourceKey& materialKey,
+                      DrawableGroup* group = nullptr);
+
+  Flags flags_;
 
   // ======== General geometry data ========
   // shared_ptr is used here, instead of Corrade::Containers::Optional, or
@@ -860,7 +912,12 @@ class ResourceManager {
    */
   gfx::ShaderManager shaderManager_;
 
-  // ======== File and primitive importers ========
+  // ======== Metadata, File and primitive importers ========
+  /**
+   * @brief A reference to the MetadataMediator managing all the metadata
+   * currently in use.
+   */
+  metadata::MetadataMediator::ptr metadataMediator_ = nullptr;
   /**
    * @brief Plugin Manager used to instantiate importers which in turn are used
    * to load asset data
@@ -881,26 +938,6 @@ class ResourceManager {
 
   // ======== Physical parameter data ========
 
-  /**
-   * @brief Manages all construction and access to asset attributes.
-   */
-  AttrMgrs::AssetAttributesManager::ptr assetAttributesManager_ = nullptr;
-
-  /**
-   * @brief Manages all construction and access to object attributes.
-   */
-  AttrMgrs::ObjectAttributesManager::ptr objectAttributesManager_ = nullptr;
-
-  /**
-   * @brief Manages all construction and access to physics world attributes.
-   */
-  AttrMgrs::PhysicsAttributesManager::ptr physicsAttributesManager_ = nullptr;
-
-  /**
-   * @brief Manages all construction and access to scene attributes.
-   */
-  AttrMgrs::StageAttributesManager::ptr stageAttributesManager_ = nullptr;
-
   //! tracks primitive mesh ids
   int nextPrimitiveMeshId = 0;
   /**
@@ -920,6 +957,8 @@ class ResourceManager {
    */
   bool requiresTextures_ = true;
 };
+
+CORRADE_ENUMSET_OPERATORS(ResourceManager::Flags)
 
 }  // namespace assets
 }  // namespace esp

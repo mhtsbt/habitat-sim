@@ -33,7 +33,6 @@ class AbstractObjectAttributes;
 
 namespace physics {
 
-namespace Attrs = esp::metadata::attributes;
 /**
 @brief Motion type of a @ref RigidObject.
 Defines its treatment by the simulator and operations which can be performed on
@@ -41,9 +40,10 @@ it.
 */
 enum class MotionType {
   /**
-   * Refers to an error (such as a query to non-existing object).
+   * Refers to an error (such as a query to non-existing object) or an
+   * unknown/unspecified value.
    */
-  ERROR_MOTIONTYPE,
+  UNDEFINED = -1,
 
   /**
    * The object is not expected to move and should not allow kinematic updates.
@@ -635,7 +635,8 @@ class RigidBase : public Magnum::SceneGraph::AbstractFeature3D {
   /**
    * @brief Saved attributes when the object was initialized.
    */
-  Attrs::AbstractObjectAttributes::ptr initializationAttributes_ = nullptr;
+  metadata::attributes::AbstractObjectAttributes::ptr
+      initializationAttributes_ = nullptr;
 
   //! Access for the object to its own PhysicsManager id. Scene will keep -1.
   int objectId_ = -1;

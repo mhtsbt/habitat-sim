@@ -15,6 +15,7 @@
 #include "esp/gfx/Renderer.h"
 #include "esp/scene/SemanticScene.h"
 #include "esp/sim/Simulator.h"
+#include "esp/sim/SimulatorConfiguration.h"
 
 namespace py = pybind11;
 using py::literals::operator""_a;
@@ -82,25 +83,36 @@ void initSimBindings(py::module& m) {
       .def_property("frustum_culling", &Simulator::isFrustumCullingEnabled,
                     &Simulator::setFrustumCullingEnabled,
                     R"(Enable or disable the frustum culling)")
+      .def_property(
+          "active_dataset", &Simulator::getActiveSceneDatasetName,
+          &Simulator::setActiveSceneDatasetName,
+          R"(The currently active dataset being used.  Will attempt to load
+            configuration files specified if does not already exist.)")
       /* --- Physics functions --- */
       /* --- Template Manager accessors --- */
-      .def(
-          "get_asset_template_manager", &Simulator::getAssetAttributesManager,
-          pybind11::return_value_policy::reference,
-          R"(Get the Simulator's AssetAttributesManager instance for configuring primitive asset templates.)")
-      .def(
-          "get_object_template_manager", &Simulator::getObjectAttributesManager,
-          pybind11::return_value_policy::reference,
-          R"(Get the Simulator's ObjectAttributesManager instance for configuring object templates.)")
-      .def(
-          "get_physics_template_manager",
-          &Simulator::getPhysicsAttributesManager,
-          pybind11::return_value_policy::reference,
-          R"(Get the Simulator's PhysicsAttributesManager instance for configuring PhysicsManager templates.)")
-      .def(
-          "get_stage_template_manager", &Simulator::getStageAttributesManager,
-          pybind11::return_value_policy::reference,
-          R"(Get the Simulator's StageAttributesManager instance for configuring simulation stage templates.)")
+      .def("get_asset_template_manager", &Simulator::getAssetAttributesManager,
+           pybind11::return_value_policy::reference,
+           R"(Get the current dataset's AssetAttributesManager instance
+            for configuring primitive asset templates.)")
+      .def("get_lighting_template_manager",
+           &Simulator::getLightLayoutAttributesManager,
+           pybind11::return_value_policy::reference,
+           R"(Get the current dataset's LightLayoutAttributesManager instance
+            for configuring light templates and layouts.)")
+      .def("get_object_template_manager",
+           &Simulator::getObjectAttributesManager,
+           pybind11::return_value_policy::reference,
+           R"(Get the current dataset's ObjectAttributesManager instance
+            for configuring object templates.)")
+      .def("get_physics_template_manager",
+           &Simulator::getPhysicsAttributesManager,
+           pybind11::return_value_policy::reference,
+           R"(Get the current dataset's PhysicsAttributesManager instance
+            for configuring PhysicsManager templates.)")
+      .def("get_stage_template_manager", &Simulator::getStageAttributesManager,
+           pybind11::return_value_policy::reference,
+           R"(Get the current dataset's StageAttributesManager instance
+            for configuring simulation stage templates.)")
       .def(
           "get_physics_simulation_library",
           &Simulator::getPhysicsSimulationLibrary,
@@ -250,7 +262,13 @@ void initSimBindings(py::module& m) {
       .def(
           "set_object_light_setup", &Simulator::setObjectLightSetup,
           "object_id"_a, "light_setup_key"_a, "scene_id"_a = 0,
-          R"(Modify the LightSetup used to the render all components of an object by setting the LightSetup key referenced by all Drawables attached to the object's visual SceneNodes.)");
+          R"(Modify the LightSetup used to the render all components of an object by setting the LightSetup key referenced by all Drawables attached to the object's visual SceneNodes.)")
+
+      .def(
+          "get_num_active_contact_points",
+          &Simulator::getNumActiveContactPoints,
+          R"(The number of contact points that were active during the last step. An object resting on another object will involve several active contact points. Once both objects are asleep, the contact points are inactive. This count can be used as a metric for the complexity/cost of collision-handling in the current scene.)");
+  ;
 }
 
 }  // namespace sim

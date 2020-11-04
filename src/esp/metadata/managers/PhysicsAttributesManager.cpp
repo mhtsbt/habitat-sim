@@ -19,18 +19,9 @@ namespace managers {
 PhysicsManagerAttributes::ptr PhysicsAttributesManager::createObject(
     const std::string& physicsFilename,
     bool registerTemplate) {
-  PhysicsManagerAttributes::ptr attrs;
   std::string msg;
-  if (this->isValidFileName(physicsFilename)) {
-    // check if physicsFilename corresponds to an actual file descriptor
-    // this method lives in class template.
-    attrs = this->createObjectFromFile(physicsFilename, registerTemplate);
-    msg = "File (" + physicsFilename + ") Based";
-  } else {
-    // if name is not file descriptor, return default attributes.
-    attrs = this->createDefaultObject(physicsFilename, registerTemplate);
-    msg = "File (" + physicsFilename + ") not found so new, default";
-  }
+  PhysicsManagerAttributes::ptr attrs = this->createFromJsonOrDefaultInternal(
+      physicsFilename, msg, registerTemplate);
 
   if (nullptr != attrs) {
     LOG(INFO) << msg << " physics manager attributes created"
@@ -39,17 +30,14 @@ PhysicsManagerAttributes::ptr PhysicsAttributesManager::createObject(
   return attrs;
 }  // PhysicsAttributesManager::createObject
 
-PhysicsManagerAttributes::ptr PhysicsAttributesManager::loadFromJSONDoc(
-    const std::string& templateName,
-    const io::JsonDocument& jsonConfig) {
-  // Attributes descriptor for physics world
-  PhysicsManagerAttributes::ptr physicsManagerAttributes =
-      initNewObjectInternal(templateName);
-
-  // load the simulator preference - default is "none" simulator, set in
+void PhysicsAttributesManager::setValsFromJSONDoc(
+    PhysicsManagerAttributes::ptr physicsManagerAttributes,
+    const io::JsonGenericValue&
+        jsonConfig) {  // load the simulator preference - default is "none"
+                       // simulator, set in
   // attributes ctor.
-  io::jsonIntoSetter<std::string>(
-      jsonConfig, "physics simulator",
+  io::jsonIntoConstSetter<std::string>(
+      jsonConfig, "physics_simulator",
       std::bind(&PhysicsManagerAttributes::setSimulator,
                 physicsManagerAttributes, _1));
 
@@ -59,18 +47,18 @@ PhysicsManagerAttributes::ptr PhysicsAttributesManager::loadFromJSONDoc(
                                        physicsManagerAttributes, _1));
 
   // load the max substeps between time step
-  io::jsonIntoSetter<int>(jsonConfig, "max substeps",
+  io::jsonIntoSetter<int>(jsonConfig, "max_substeps",
                           std::bind(&PhysicsManagerAttributes::setMaxSubsteps,
                                     physicsManagerAttributes, _1));
   // load the friction coefficient
   io::jsonIntoSetter<double>(
-      jsonConfig, "friction coefficient",
+      jsonConfig, "friction_coefficient",
       std::bind(&PhysicsManagerAttributes::setFrictionCoefficient,
                 physicsManagerAttributes, _1));
 
   // load the restitution coefficient
   io::jsonIntoSetter<double>(
-      jsonConfig, "restitution coefficient",
+      jsonConfig, "restitution_coefficient",
       std::bind(&PhysicsManagerAttributes::setRestitutionCoefficient,
                 physicsManagerAttributes, _1));
 
@@ -80,29 +68,6 @@ PhysicsManagerAttributes::ptr PhysicsAttributesManager::loadFromJSONDoc(
       std::bind(&PhysicsManagerAttributes::setGravity, physicsManagerAttributes,
                 _1));
 
-  // load the rigid object library metadata (no physics init yet...)
-  if (jsonConfig.HasMember("rigid object paths") &&
-      jsonConfig["rigid object paths"].IsArray()) {
-    std::string configDirectory = physicsManagerAttributes->getFileDirectory();
-
-    const auto& paths = jsonConfig["rigid object paths"];
-    for (rapidjson::SizeType i = 0; i < paths.Size(); i++) {
-      if (!paths[i].IsString()) {
-        LOG(ERROR) << "PhysicsAttributesManager::createAttributesTemplate "
-                      ":Invalid value in physics scene config -rigid object "
-                      "library- array "
-                   << i;
-        continue;
-      }
-
-      std::string absolutePath =
-          Cr::Utility::Directory::join(configDirectory, paths[i].GetString());
-      // load all object templates available as configs in absolutePath
-      objectAttributesMgr_->loadObjectConfigs(absolutePath, true);
-    }
-  }  // if load rigid object library metadata
-
-  return physicsManagerAttributes;
 }  // PhysicsAttributesManager::createFileBasedAttributesTemplate
 
 }  // namespace managers

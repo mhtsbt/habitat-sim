@@ -13,15 +13,13 @@
 namespace esp {
 namespace assets {
 enum class AssetType;
-}
+}  // namespace assets
 namespace metadata {
-
 namespace managers {
 class StageAttributesManager
-    : public AbstractObjectAttributesManager<Attrs::StageAttributes> {
+    : public AbstractObjectAttributesManager<attributes::StageAttributes> {
  public:
   StageAttributesManager(
-      esp::assets::ResourceManager& resourceManager,
       ObjectAttributesManager::ptr objectAttributesMgr,
       PhysicsAttributesManager::ptr physicsAttributesManager);
 
@@ -62,26 +60,6 @@ class StageAttributesManager
 
   /**
    * @brief Creates an instance of a stage template described by passed
-   * string. For stage templates, this a file name.
-   *
-   * If a template exists with this handle, this existing template will be
-   * overwritten with the newly created one if registerTemplate is true.
-   *
-   * @param attributesTemplateHandle the origin of the desired stage template to
-   * be created.
-   * @param registerTemplate whether to add this template to the library.
-   * If the user is going to edit this template, this should be false - any
-   * subsequent editing will require re-registration. Defaults to true. If
-   * specified as true, then this function returns a copy of the registered
-   * template.
-   * @return a reference to the desired template.
-   */
-  Attrs::StageAttributes::ptr createObject(
-      const std::string& attributesTemplateHandle,
-      bool registerTemplate = true) override;
-
-  /**
-   * @brief Creates an instance of a stage template described by passed
    * string, which should be a reference to an existing primitive asset template
    * to be used in the construction of the stage (as render and collision
    * mesh). It returns existing instance if there is one, and nullptr if fails.
@@ -93,24 +71,18 @@ class StageAttributesManager
    * subsequent editing will require re-registration. Defaults to true.
    * @return a reference to the desired stage template, or nullptr if fails.
    */
-  Attrs::StageAttributes::ptr createPrimBasedAttributesTemplate(
+  attributes::StageAttributes::ptr createPrimBasedAttributesTemplate(
       const std::string& primAttrTemplateHandle,
-      bool registerTemplate = true);
+      bool registerTemplate = true) override;
 
   /**
-   * @brief Parse passed JSON Document specifically for @ref
-   * esp::metadata::attributes::StageAttributes object. It always returns a
-   * valid @ref esp::metadata::attributes::StageAttributes shared pointer
-   * object.
-   *
-   * @param templateName the desired handle of the @ref
-   * esp::metadata::attributes::StageAttributes attributes.
+   * @brief Method to take an existing attributes and set its values from passed
+   * json config file.
+   * @param attribs (out) an existing attributes to be modified.
    * @param jsonConfig json document to parse
-   * @return a reference to the desired template.
    */
-  Attrs::StageAttributes::ptr loadFromJSONDoc(
-      const std::string& templateName,
-      const io::JsonDocument& jsonConfig) override;
+  void setValsFromJSONDoc(attributes::StageAttributes::ptr attribs,
+                          const io::JsonGenericValue& jsonConfig) override;
 
  protected:
   /**
@@ -137,7 +109,7 @@ class StageAttributesManager
    * @param assetTypeSetter Setter for mesh type.
    */
   void setDefaultAssetNameBasedAttributes(
-      Attrs::StageAttributes::ptr attributes,
+      attributes::StageAttributes::ptr attributes,
       bool setFrame,
       const std::string& meshHandle,
       std::function<void(int)> assetTypeSetter) override;
@@ -146,9 +118,14 @@ class StageAttributesManager
    * any default values, before any specific values are set.
    *
    * @param handleName handle name to be assigned to attributes
+   * @param builtFromConfig whether this stage is being built from a config file
+   * (i.e. handleName is file name for config) or from some other source.
+   * @return Newly created but unregistered StageAttributes pointer, with only
+   * default values set.
    */
-  Attrs::StageAttributes::ptr initNewObjectInternal(
-      const std::string& handleName) override;
+  attributes::StageAttributes::ptr initNewObjectInternal(
+      const std::string& handleName,
+      bool builtFromConfig) override;
 
   /**
    * @brief This method will perform any necessary updating that is
@@ -177,7 +154,7 @@ class StageAttributesManager
    */
 
   int registerObjectFinalize(
-      Attrs::StageAttributes::ptr StageAttributesTemplate,
+      attributes::StageAttributes::ptr StageAttributesTemplate,
       const std::string& StageAttributesHandle) override;
 
   /**
@@ -191,10 +168,7 @@ class StageAttributesManager
    * pointer for the copy constructor as required by
    * AttributesManager<StageAttributes::ptr>
    */
-  void buildCtorFuncPtrMaps() override {
-    this->copyConstructorMap_["StageAttributes"] =
-        &StageAttributesManager::createObjectCopy<Attrs::StageAttributes>;
-  }  // StageAttributesManager::buildCtorFuncPtrMaps
+  void buildCtorFuncPtrMaps() override;
 
   // instance vars
 

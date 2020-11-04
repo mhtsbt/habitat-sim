@@ -6,6 +6,7 @@
 
 #include <memory>
 #include <string>
+#include <utility>
 
 #include <Corrade/Utility/Directory.h>
 #include <Corrade/Utility/String.h>
@@ -30,8 +31,8 @@ namespace Cr = Corrade;
 namespace esp {
 namespace sim {
 
-using Attrs::PhysicsManagerAttributes;
-using Attrs::StageAttributes;
+using metadata::attributes::PhysicsManagerAttributes;
+using metadata::attributes::StageAttributes;
 
 Simulator::Simulator(const SimulatorConfiguration& cfg)
     : random_{core::Random::create(cfg.randomSeed)},
@@ -73,8 +74,19 @@ void Simulator::close() {
 }
 
 void Simulator::reconfigure(const SimulatorConfiguration& cfg) {
+  // set dataset upon creation or reconfigure
+  if (!metadataMediator_) {
+    metadataMediator_ =
+        metadata::MetadataMediator::create(cfg.sceneDatasetConfigFile);
+  } else {
+    metadataMediator_->setActiveSceneDatasetName(cfg.sceneDatasetConfigFile);
+  }
+  // assign MM to RM on create or reconfigure
   if (!resourceManager_) {
-    resourceManager_ = std::make_unique<assets::ResourceManager>();
+    resourceManager_ =
+        std::make_unique<assets::ResourceManager>(metadataMediator_);
+  } else {
+    resourceManager_->setMetadataMediator(metadataMediator_);
   }
 
   if (!sceneManager_) {
@@ -106,12 +118,12 @@ void Simulator::reconfigure(const SimulatorConfiguration& cfg) {
   // described by config file - this always exists to configure scene
   // attributes
   auto physicsManagerAttributes =
-      resourceManager_->getPhysicsAttributesManager()->createObject(
+      metadataMediator_->getPhysicsAttributesManager()->createObject(
           config_.physicsConfigFile, true);
   // if physicsManagerAttributes have been successfully created, inform
   // stageAttributesManager of the config handle of the attributes, so that
   // stageAttributes initialization can use phys Mgr Attr values as defaults
-  auto stageAttributesMgr = resourceManager_->getStageAttributesManager();
+  auto stageAttributesMgr = metadataMediator_->getStageAttributesManager();
   if (physicsManagerAttributes != nullptr) {
     stageAttributesMgr->setCurrPhysicsManagerAttributesHandle(
         physicsManagerAttributes->getHandle());
@@ -209,7 +221,7 @@ void Simulator::reconfigure(const SimulatorConfiguration& cfg) {
     }
 
     const Magnum::Range3D& sceneBB = rootNode.computeCumulativeBB();
-    resourceManager_->setLightSetup(gfx::getLightsAtBoxCorners(sceneBB));
+    resourceManager_->setLightSetup(gfx::getDefaultLights());
 
     // set activeSemanticSceneID_ values and push onto sceneID vector if
     // appropriate - tempIDs[1] will either be old activeSemanticSceneID_ (if
@@ -280,7 +292,7 @@ void Simulator::reset() {
   }
   const Magnum::Range3D& sceneBB =
       getActiveSceneGraph().getRootNode().computeCumulativeBB();
-  resourceManager_->setLightSetup(gfx::getLightsAtBoxCorners(sceneBB));
+  resourceManager_->setLightSetup(gfx::getDefaultLights());
 }  // Simulator::reset()
 
 void Simulator::seed(uint32_t newSeed) {
@@ -299,23 +311,6 @@ scene::SceneGraph& Simulator::getActiveSemanticSceneGraph() {
   CHECK_GE(activeSemanticSceneID_, 0);
   CHECK_LT(activeSemanticSceneID_, sceneID_.size());
   return sceneManager_->getSceneGraph(activeSemanticSceneID_);
-}
-
-bool operator==(const SimulatorConfiguration& a,
-                const SimulatorConfiguration& b) {
-  return a.scene == b.scene && a.defaultAgentId == b.defaultAgentId &&
-         a.defaultCameraUuid == b.defaultCameraUuid &&
-         a.compressTextures == b.compressTextures &&
-         a.createRenderer == b.createRenderer &&
-         a.enablePhysics == b.enablePhysics &&
-         a.physicsConfigFile.compare(b.physicsConfigFile) == 0 &&
-         a.loadSemanticMesh == b.loadSemanticMesh &&
-         a.sceneLightSetup.compare(b.sceneLightSetup) == 0;
-}
-
-bool operator!=(const SimulatorConfiguration& a,
-                const SimulatorConfiguration& b) {
-  return !(a == b);
 }
 
 // === Physics Simulator Functions ===
@@ -350,17 +345,17 @@ int Simulator::addObjectByHandle(const std::string& objectLibHandle,
   return ID_UNDEFINED;
 }
 
-const Attrs::ObjectAttributes::cptr Simulator::getObjectInitializationTemplate(
-    const int objectId,
-    const int sceneID) const {
+const metadata::attributes::ObjectAttributes::cptr
+Simulator::getObjectInitializationTemplate(const int objectId,
+                                           const int sceneID) const {
   if (sceneHasPhysics(sceneID)) {
     return physicsManager_->getObjectInitAttributes(objectId);
   }
   return nullptr;
 }
 
-const Attrs::StageAttributes::cptr Simulator::getStageInitializationTemplate(
-    const int sceneID) const {
+const metadata::attributes::StageAttributes::cptr
+Simulator::getStageInitializationTemplate(const int sceneID) const {
   if (sceneHasPhysics(sceneID)) {
     return physicsManager_->getStageInitAttributes();
   }
@@ -390,7 +385,7 @@ esp::physics::MotionType Simulator::getObjectMotionType(const int objectID,
   if (sceneHasPhysics(sceneID)) {
     return physicsManager_->getObjectMotionType(objectID);
   }
-  return esp::physics::MotionType::ERROR_MOTIONTYPE;
+  return esp::physics::MotionType::UNDEFINED;
 }
 
 bool Simulator::setObjectMotionType(const esp::physics::MotionType& motionType,
@@ -645,8 +640,9 @@ bool Simulator::recomputeNavMesh(nav::PathFinder& pathfinder,
             Eigen::Transform<float, 3, Eigen::Affine> >(
             physicsManager_->getObjectVisualSceneNode(objectID)
                 .absoluteTransformationMatrix());
-        const Attrs::ObjectAttributes::cptr initializationTemplate =
-            physicsManager_->getObjectInitAttributes(objectID);
+        const metadata::attributes::ObjectAttributes::cptr
+            initializationTemplate =
+                physicsManager_->getObjectInitAttributes(objectID);
         objectTransform.scale(Magnum::EigenIntegration::cast<vec3f>(
             initializationTemplate->getScale()));
         std::string meshHandle =
@@ -784,7 +780,7 @@ nav::PathFinder::ptr Simulator::getPathFinder() {
 }
 
 void Simulator::setPathFinder(nav::PathFinder::ptr pathfinder) {
-  pathfinder_ = pathfinder;
+  pathfinder_ = std::move(pathfinder);
 }
 gfx::RenderTarget* Simulator::getRenderTarget(int agentId,
                                               const std::string& sensorId) {

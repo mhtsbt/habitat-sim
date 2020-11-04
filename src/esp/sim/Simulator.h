@@ -12,16 +12,15 @@
 #include "esp/core/random.h"
 #include "esp/gfx/RenderTarget.h"
 #include "esp/gfx/WindowlessContext.h"
-#include "esp/metadata/managers/AssetAttributesManager.h"
-#include "esp/metadata/managers/ObjectAttributesManager.h"
-#include "esp/metadata/managers/PhysicsAttributesManager.h"
-#include "esp/metadata/managers/StageAttributesManager.h"
+#include "esp/metadata/MetadataMediator.h"
 #include "esp/nav/PathFinder.h"
 #include "esp/physics/PhysicsManager.h"
 #include "esp/physics/RigidObject.h"
 #include "esp/scene/SceneConfiguration.h"
 #include "esp/scene/SceneManager.h"
 #include "esp/scene/SceneNode.h"
+
+#include "SimulatorConfiguration.h"
 
 namespace esp {
 namespace nav {
@@ -39,49 +38,6 @@ class Renderer;
 
 namespace esp {
 namespace sim {
-namespace AttrMgrs = esp::metadata::managers;
-namespace Attrs = esp::metadata::attributes;
-
-struct SimulatorConfiguration {
-  scene::SceneConfiguration scene;
-  int defaultAgentId = 0;
-  int gpuDeviceId = 0;
-  unsigned int randomSeed = 0;
-  std::string defaultCameraUuid = "rgba_camera";
-  bool compressTextures = false;
-  bool createRenderer = true;
-  // Whether or not the agent can slide on collisions
-  bool allowSliding = true;
-  // enable or disable the frustum culling
-  bool frustumCulling = true;
-  /**
-   * @brief This flags specifies whether or not dynamics is supported by the
-   * simulation, if a suitable library (i.e. Bullet) has been installed.
-   */
-  bool enablePhysics = false;
-  /**
-   * @brief Whether or not to load the semantic mesh
-   */
-  bool loadSemanticMesh = true;
-  /**
-   * @brief Whether or not to load textures for the meshes. This MUST be true
-   * for RGB rendering
-   */
-  bool requiresTextures = true;
-  std::string physicsConfigFile =
-      ESP_DEFAULT_PHYS_SCENE_CONFIG_REL_PATH;  // should we instead link a
-                                               // PhysicsManagerConfiguration
-                                               // object here?
-  /** @brief Light setup key for scene */
-  std::string sceneLightSetup = assets::ResourceManager::NO_LIGHT_KEY;
-
-  ESP_SMART_POINTERS(SimulatorConfiguration)
-};
-bool operator==(const SimulatorConfiguration& a,
-                const SimulatorConfiguration& b);
-bool operator!=(const SimulatorConfiguration& a,
-                const SimulatorConfiguration& b);
-
 class Simulator {
  public:
   explicit Simulator(const SimulatorConfiguration& cfg);
@@ -130,33 +86,61 @@ class Simulator {
   // TODO: support multi-scene physics (default sceneID=0 currently).
 
   /**
-   * @brief Return manager for construction and access to asset attributes.
+   * @brief Return manager for construction and access to asset attributes for
+   * the current dataset.
    */
-  const AttrMgrs::AssetAttributesManager::ptr getAssetAttributesManager()
-      const {
-    return resourceManager_->getAssetAttributesManager();
+  const metadata::managers::AssetAttributesManager::ptr
+  getAssetAttributesManager() const {
+    return metadataMediator_->getAssetAttributesManager();
   }
   /**
-   * @brief Return manager for construction and access to object attributes.
+   * @brief Return manager for construction and access to light attributes and
+   * layouts for the current dataset.
    */
-  const AttrMgrs::ObjectAttributesManager::ptr getObjectAttributesManager()
-      const {
-    return resourceManager_->getObjectAttributesManager();
+  const metadata::managers::LightLayoutAttributesManager::ptr
+  getLightLayoutAttributesManager() const {
+    return metadataMediator_->getLightLayoutAttributesManager();
+  }
+
+  /**
+   * @brief Return manager for construction and access to object attributes and
+   * layouts for the current dataset.
+   */
+  const metadata::managers::ObjectAttributesManager::ptr
+  getObjectAttributesManager() const {
+    return metadataMediator_->getObjectAttributesManager();
   }
   /**
    * @brief Return manager for construction and access to physics world
    * attributes.
    */
-  const AttrMgrs::PhysicsAttributesManager::ptr getPhysicsAttributesManager()
-      const {
-    return resourceManager_->getPhysicsAttributesManager();
+  const metadata::managers::PhysicsAttributesManager::ptr
+  getPhysicsAttributesManager() const {
+    return metadataMediator_->getPhysicsAttributesManager();
   }
   /**
-   * @brief Return manager for construction and access to scene attributes.
+   * @brief Return manager for construction and access to scene attributes for
+   * the current dataset.
    */
-  const AttrMgrs::StageAttributesManager::ptr getStageAttributesManager()
-      const {
-    return resourceManager_->getStageAttributesManager();
+  const metadata::managers::StageAttributesManager::ptr
+  getStageAttributesManager() const {
+    return metadataMediator_->getStageAttributesManager();
+  }
+
+  /**
+   * @brief Get current active dataset name from @ref metadataMediator_.
+   */
+  std::string getActiveSceneDatasetName() {
+    return metadataMediator_->getActiveSceneDatasetName();
+  }
+
+  /**
+   * @brief Set current active dataset name from @ref metadataMediator_.
+   * @param _dsHandle The desired dataset to switch to. If has not been loaded,
+   * an attempt will be made to load it.
+   */
+  void setActiveSceneDatasetName(const std::string& _dsHandle) {
+    metadataMediator_->setActiveSceneDatasetName(_dsHandle);
   }
 
   /** @brief Return the library implementation type for the simulator currently
@@ -229,17 +213,16 @@ class Simulator {
    * Use this to query the object's properties when it was initialized.  Object
    * pointed at by pointer is const, and can not be modified.
    */
-  const Attrs::ObjectAttributes::cptr getObjectInitializationTemplate(
-      int objectId,
-      int sceneID = 0) const;
+  const metadata::attributes::ObjectAttributes::cptr
+  getObjectInitializationTemplate(int objectId, int sceneID = 0) const;
 
   /**
    * @brief Get a copy of a stage's template when the stage was instanced.
    *
    * Use this to query the stage's properties when it was initialized.
    */
-  const Attrs::StageAttributes::cptr getStageInitializationTemplate(
-      int sceneID = 0) const;
+  const metadata::attributes::StageAttributes::cptr
+  getStageInitializationTemplate(int sceneID = 0) const;
 
   /**
    * @brief Remove an instanced object by ID. See @ref
@@ -272,7 +255,7 @@ class Simulator {
    * @param sceneID !! Not used currently !! Specifies which physical scene to
    * query.
    * @return The @ref esp::physics::MotionType of the object or @ref
-   * esp::physics::MotionType::ERROR_MOTIONTYPE if query failed.
+   * esp::physics::MotionType::UNDEFINED if query failed.
    */
   esp::physics::MotionType getObjectMotionType(int objectID, int sceneID = 0);
 
@@ -719,6 +702,17 @@ class Simulator {
    */
   core::Random::ptr random() { return random_; }
 
+  int getNumActiveContactPoints() {
+    return physicsManager_->getNumActiveContactPoints();
+  }
+
+  /**
+   * @brief Set this simulator's MetadataMediator
+   */
+  void setMetadataMediator(metadata::MetadataMediator::ptr _metadataMediator) {
+    metadataMediator_ = _metadataMediator;
+  }
+
  protected:
   Simulator(){};
 
@@ -743,6 +737,8 @@ class Simulator {
   // during the deconstruction
   std::unique_ptr<assets::ResourceManager> resourceManager_ = nullptr;
 
+  // Owns and manages the metadata/attributes managers
+  metadata::MetadataMediator::ptr metadataMediator_ = nullptr;
   scene::SceneManager::uptr sceneManager_ = nullptr;
   int activeSceneID_ = ID_UNDEFINED;
   int activeSemanticSceneID_ = ID_UNDEFINED;

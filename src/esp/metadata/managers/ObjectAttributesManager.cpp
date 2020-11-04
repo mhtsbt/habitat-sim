@@ -22,53 +22,6 @@ namespace metadata {
 using attributes::AbstractObjectAttributes;
 using attributes::ObjectAttributes;
 namespace managers {
-ObjectAttributes::ptr ObjectAttributesManager::createObject(
-    const std::string& attributesTemplateHandle,
-    bool registerTemplate) {
-  ObjectAttributes::ptr attrs;
-  std::string msg;
-  if (this->isValidPrimitiveAttributes(attributesTemplateHandle)) {
-    // if attributesTemplateHandle == some existing primitive attributes, then
-    // this is a primitive-based object we are building
-    attrs = createPrimBasedAttributesTemplate(attributesTemplateHandle,
-                                              registerTemplate);
-    msg = "Primitive Asset (" + attributesTemplateHandle + ") Based";
-  } else {
-    std::string JSONTypeExt("phys_properties.json");
-    std::string strHandle =
-        Cr::Utility::String::lowercase(attributesTemplateHandle);
-    std::string jsonAttrFileName =
-        (strHandle.find(JSONTypeExt) != std::string::npos)
-            ? std::string(attributesTemplateHandle)
-            : io::changeExtension(attributesTemplateHandle, JSONTypeExt);
-    bool fileExists = (this->isValidFileName(attributesTemplateHandle));
-    bool jsonFileExists = (this->isValidFileName(jsonAttrFileName));
-    if (jsonFileExists) {
-      // check if stageAttributesHandle corresponds to an actual, existing
-      // json stage file descriptor.
-      // this method lives in class template.
-      attrs = this->createObjectFromFile(jsonAttrFileName, registerTemplate);
-      msg = "JSON File (" + jsonAttrFileName + ") Based";
-    } else {
-      // if name is not json file descriptor but still appropriate file, or if
-      // is not a file or known prim
-      attrs =
-          this->createDefaultObject(attributesTemplateHandle, registerTemplate);
-
-      if (fileExists) {
-        msg = "File (" + attributesTemplateHandle + ") Based";
-      } else {
-        msg = "New default (" + attributesTemplateHandle + ")";
-      }
-    }
-  }  // if this is prim else
-  if (nullptr != attrs) {
-    LOG(INFO) << msg << " object attributes created"
-              << (registerTemplate ? " and registered." : ".");
-  }
-  return attrs;
-
-}  // ObjectAttributesManager::createObject
 
 ObjectAttributes::ptr
 ObjectAttributesManager::createPrimBasedAttributesTemplate(
@@ -84,9 +37,9 @@ ObjectAttributesManager::createPrimBasedAttributesTemplate(
     return nullptr;
   }
 
-  // construct a ObjectAttributes
+  // construct a ObjectAttributes based on prim handle
   auto primObjectAttributes =
-      this->initNewObjectInternal(primAttrTemplateHandle);
+      this->initNewObjectInternal(primAttrTemplateHandle, false);
   // set margin to be 0
   primObjectAttributes->setMargin(0.0);
   // make smaller as default size - prims are approx meter in size
@@ -120,29 +73,33 @@ void ObjectAttributesManager::createDefaultPrimBasedAttributesTemplates() {
   }
 }  // ObjectAttributesManager::createDefaultPrimBasedAttributesTemplates
 
-ObjectAttributes::ptr ObjectAttributesManager::loadFromJSONDoc(
-    const std::string& templateName,
-    const io::JsonDocument& jsonConfig) {
-  // Construct a ObjectAttributes and populate with any AbstractObjectAttributes
-  // fields found in json.
-  auto objAttributes =
-      this->createObjectAttributesFromJson(templateName, jsonConfig);
+void ObjectAttributesManager::setValsFromJSONDoc(
+    attributes::ObjectAttributes::ptr objAttributes,
+    const io::JsonGenericValue& jsonConfig) {
+  this->loadAbstractObjectAttributesFromJson(objAttributes, jsonConfig);
 
   // Populate with object-specific fields found in json, if any are there.
   // object mass
   io::jsonIntoSetter<double>(
       jsonConfig, "mass",
       std::bind(&ObjectAttributes::setMass, objAttributes, _1));
-
+  // linear damping
+  io::jsonIntoSetter<double>(
+      jsonConfig, "linear_damping",
+      std::bind(&ObjectAttributes::setLinearDamping, objAttributes, _1));
+  // angular damping
+  io::jsonIntoSetter<double>(
+      jsonConfig, "angular_damping",
+      std::bind(&ObjectAttributes::setAngularDamping, objAttributes, _1));
   // Use bounding box as collision object
   io::jsonIntoSetter<bool>(
-      jsonConfig, "use bounding box for collision",
+      jsonConfig, "use_bounding_box_for_collision",
       std::bind(&ObjectAttributes::setBoundingBoxCollisions, objAttributes,
                 _1));
 
   // Join collision meshes if specified
   io::jsonIntoSetter<bool>(
-      jsonConfig, "join collision meshes",
+      jsonConfig, "join_collision_meshes",
       std::bind(&ObjectAttributes::setJoinCollisionMeshes, objAttributes, _1));
 
   // The object's interia matrix diagonal
@@ -157,32 +114,37 @@ ObjectAttributes::ptr ObjectAttributesManager::loadFromJSONDoc(
       std::bind(&ObjectAttributes::setCOM, objAttributes, _1));
   // if com is set from json, don't compute from shape, and vice versa
   objAttributes->setComputeCOMFromShape(!comIsSet);
-
-  return objAttributes;
-}  // ObjectAttributesManager::createFileBasedAttributesTemplate
+}  // ObjectAttributesManager::setValsFromJSONDoc
 
 ObjectAttributes::ptr ObjectAttributesManager::initNewObjectInternal(
-    const std::string& attributesHandle) {
-  // TODO if default template exists from some source, create this template as a
-  // copy
-  auto newAttributes = ObjectAttributes::create(attributesHandle);
-
+    const std::string& attributesHandle,
+    bool builtFromConfig) {
+  ObjectAttributes::ptr newAttributes =
+      this->constructFromDefault(attributesHandle);
+  if (nullptr == newAttributes) {
+    newAttributes = ObjectAttributes::create(attributesHandle);
+  }
   this->setFileDirectoryFromHandle(newAttributes);
-  // set default render asset handle
-  newAttributes->setRenderAssetHandle(attributesHandle);
-  // set default collision asset handle
-  newAttributes->setCollisionAssetHandle(attributesHandle);
-  // set defaults for passed render asset handles
-  this->setDefaultAssetNameBasedAttributes(
-      newAttributes, true, newAttributes->getRenderAssetHandle(),
-      std::bind(&AbstractObjectAttributes::setRenderAssetType, newAttributes,
-                _1));
-  // set defaults for passed collision asset handles
-  this->setDefaultAssetNameBasedAttributes(
-      newAttributes, false, newAttributes->getCollisionAssetHandle(),
-      std::bind(&AbstractObjectAttributes::setCollisionAssetType, newAttributes,
-                _1));
 
+  // set default render and collision asset handle\
+  // only set handle defaults if attributesHandle is not a config file (which would
+  // never be a valid render or collision asset name).  Otherise, expect handles
+  // and types to be set when config is read.
+  if (!builtFromConfig) {
+    newAttributes->setRenderAssetHandle(attributesHandle);
+    newAttributes->setCollisionAssetHandle(attributesHandle);
+
+    // set defaults for passed render asset handles
+    this->setDefaultAssetNameBasedAttributes(
+        newAttributes, true, newAttributes->getRenderAssetHandle(),
+        std::bind(&AbstractObjectAttributes::setRenderAssetType, newAttributes,
+                  _1));
+    // set defaults for passed collision asset handles
+    this->setDefaultAssetNameBasedAttributes(
+        newAttributes, false, newAttributes->getCollisionAssetHandle(),
+        std::bind(&AbstractObjectAttributes::setCollisionAssetType,
+                  newAttributes, _1));
+  }
   return newAttributes;
 }  // ObjectAttributesManager::initNewObjectInternal
 
@@ -212,9 +174,9 @@ int ObjectAttributesManager::registerObjectFinalize(
   if (objectTemplate->getRenderAssetHandle() == "") {
     LOG(ERROR)
         << "ObjectAttributesManager::registerObjectFinalize : "
-           "Attributes template named"
+           "Attributes template named "
         << objectTemplateHandle
-        << "does not have a valid render asset handle specified. Aborting.";
+        << " does not have a valid render asset handle specified. Aborting.";
     return ID_UNDEFINED;
   }
 
@@ -285,68 +247,6 @@ int ObjectAttributesManager::registerObjectFinalize(
 
   return objectTemplateID;
 }  // ObjectAttributesManager::registerObjectFinalize
-
-std::vector<int> ObjectAttributesManager::loadAllFileBasedTemplates(
-    const std::vector<std::string>& tmpltFilenames,
-    bool saveAsDefaults) {
-  std::vector<int> resIDs(tmpltFilenames.size(), ID_UNDEFINED);
-  for (int i = 0; i < tmpltFilenames.size(); ++i) {
-    auto objPhysPropertiesFilename = tmpltFilenames[i];
-    LOG(INFO) << "Loading file-based object template: "
-              << objPhysPropertiesFilename;
-    auto tmplt = this->createObjectFromFile(objPhysPropertiesFilename, true);
-
-    // save handles in list of defaults, so they are not removed, if desired.
-    if (saveAsDefaults) {
-      std::string tmpltHandle = tmplt->getHandle();
-      this->undeletableObjectNames_.insert(tmpltHandle);
-    }
-    resIDs[i] = tmplt->getID();
-  }
-  LOG(INFO) << "Loaded file-based object templates: "
-            << std::to_string(physicsFileObjTmpltLibByID_.size());
-  return resIDs;
-}  // ObjectAttributesManager::loadAllObjectTemplates
-
-std::vector<int> ObjectAttributesManager::loadObjectConfigs(
-    const std::string& path,
-    bool saveAsDefaults) {
-  std::vector<std::string> paths;
-  std::vector<int> templateIndices;
-  namespace Directory = Cr::Utility::Directory;
-  std::string objPhysPropertiesFilename = path;
-  if (!Cr::Utility::String::endsWith(objPhysPropertiesFilename,
-                                     ".phys_properties.json")) {
-    objPhysPropertiesFilename = path + ".phys_properties.json";
-  }
-  const bool dirExists = Directory::isDirectory(path);
-  const bool fileExists = Directory::exists(objPhysPropertiesFilename);
-
-  if (!dirExists && !fileExists) {
-    LOG(WARNING) << "Cannot find " << path << " or "
-                 << objPhysPropertiesFilename << ". Aborting parse.";
-    return templateIndices;
-  }
-
-  if (fileExists) {
-    paths.push_back(objPhysPropertiesFilename);
-  }
-
-  if (dirExists) {
-    LOG(INFO) << "Parsing object library directory: " + path;
-    for (auto& file : Directory::list(path, Directory::Flag::SortAscending)) {
-      std::string absoluteSubfilePath = Directory::join(path, file);
-      if (Cr::Utility::String::endsWith(absoluteSubfilePath,
-                                        ".phys_properties.json")) {
-        paths.push_back(absoluteSubfilePath);
-      }
-    }
-  }
-  // build templates from aggregated paths
-  templateIndices = loadAllFileBasedTemplates(paths, saveAsDefaults);
-
-  return templateIndices;
-}  // ObjectAttributesManager::buildObjectConfigPaths
 
 }  // namespace managers
 }  // namespace metadata
